@@ -12,6 +12,8 @@ class Def_MailTools extends ContentController
 	protected static $admin_mail_name = '';
 	protected static $sendgrid_username = '';
 	protected static $sendgrid_password = '';
+	protected static $smtp_username = '';
+	protected static $smtp_password = '';
 
 
 	/**
@@ -36,7 +38,12 @@ class Def_MailTools extends ContentController
 	
 	public static function get_admin_mail()
 	{
-		return self::$admin_mail;
+		if (self::$admin_mail == '')
+		{
+			return 'noreply@' . parse_url(Director::absoluteBaseURL(), PHP_URL_HOST);
+		} else {
+			return self::$admin_mail;
+		}
 	}
 	
 	/**
@@ -47,7 +54,12 @@ class Def_MailTools extends ContentController
 	
 	public static function get_admin_mail_name()
 	{
-		return self::$admin_mail_name;
+		if (self::$admin_mail_name == '')
+		{
+			return self::$admin_mail;
+		} else {
+			return self::$admin_mail_name;
+		}
 	}
 
 	/**
@@ -64,6 +76,19 @@ class Def_MailTools extends ContentController
 		self::$sendgrid_password = $password;
 	}
 	
+	/**
+	  * Set the SMTP credentials
+	  *
+	  * @param string $username
+	  * @param string $password
+	  * @return void
+	  */
+
+	public static function set_smtp_credentials($username, $password)
+	{
+		self::$smtp_username = $username;
+		self::$smtp_password = $password;
+	}
 	
 	/**
 	  * Get the SendGrid username
@@ -86,6 +111,29 @@ class Def_MailTools extends ContentController
 	public static function get_sendgrid_password()
 	{
 		return self::$sendgrid_password;
+	}
+	
+	/**
+	  * Get the SendGrid username
+	  *
+	  * @return string
+	  */
+
+	public static function get_smtp_username()
+	{	
+		return self::$smtp_username;
+	}
+	
+	
+	/**
+	  * Get the SendGrid password
+	  *
+	  * @return string
+	  */
+	
+	public static function get_smtp_password()
+	{
+		return self::$smtp_password;
 	}
 	
 	/**
@@ -132,13 +180,12 @@ class Def_MailTools extends ContentController
 	
 	/**
 	  * Send emails through Sendgrid
-      *
+	  *
 	  * @param array $recipients
 	  * @param string $title
 	  * @param array $content
 	  * @param string $category
-	  * @param boolean $for_admin_only
-	  * @param boolean $for_recipient_only
+	  * @param boolean $also_send_to_admin
 	  * 
 	  * @return boolean
 	  */
@@ -162,20 +209,10 @@ class Def_MailTools extends ContentController
 		}
 		
 		// Get the admin mail
-		if (self::get_admin_mail() == '')
-		{
-			$adminMail = 'noreply@' . parse_url(Director::absoluteBaseURL(), PHP_URL_HOST);
-		} else {
-			$adminMail = self::get_admin_mail();
-		}
+		$adminMail = self::get_admin_mail();
 		
 		// Get the admin name
-		if (self::get_admin_mail_name() == '')
-		{
-			$adminName = $adminMail;
-		} else {
-			$adminName = self::get_admin_mail_name();
-		}
+		$adminName = self::get_admin_mail_name();
 		
 		// Check if there also needs to go a mail to the admin
 		if($also_send_to_admin)
@@ -211,6 +248,99 @@ class Def_MailTools extends ContentController
 		// Set the content
 		$mail->AltBody = $content["textMail"];
 		$mail->MsgHTML($content["htmlMail"]);
+		
+		// Send the mail
+		if(!$mail->Send()) {
+			return false;
+		} else {
+			return true;
+		}
+	}
+	
+	/**
+	  * Send emails through SMTP
+	  *
+	  * @param array $recipients
+	  * @param string $title
+	  * @param array $content
+	  * @param boolean $also_send_to_admin
+	  * 
+	  * @return boolean
+	  */
+	public static function send_mail_SMTP($recipients, $title, $content, $also_send_to_admin = false, $server, $port = "25", $use_ssl = false, $use_auth = false)
+	{
+		
+		if($use_auth)
+		{
+			// Get the SMTP username
+			if (self::get_smtp_username() == '')
+			{
+				return false;
+			} else {
+				$SMTPUsername = self::get_smtp_username();
+			}
+			
+			// Get the SMTP password
+			if (self::get_smtp_password() == '')
+			{
+				return false;
+			} else {
+				$SMTPPassword = self::get_smtp_password();
+			}
+		}
+		
+		// Get the admin mail
+		$adminMail = self::get_admin_mail();
+		
+		// Get the admin name
+		$adminName = self::get_admin_mail_name();
+		
+		// Check if there also needs to go a mail to the admin
+		if($also_send_to_admin)
+		{
+			array_push($recipients, $adminMail);
+		}
+		
+		// Filter out duplicate recipients and implode the array to a comma seperated string
+		$recipients = array_unique($recipients);
+		$recipients = implode(', ', $recipients);
+		
+		// Create a new phpmailer and set the correct settings
+		$mail = new PHPMailer();
+		$mail->IsSMTP();
+		$mail->Host = $server . ";" . $port;
+		$mail->Port = $port;
+		
+		if($use_ssl)
+		{   echo 'ssl';
+			$mail->SMTPSecure = 'ssl';
+		}
+		if($use_auth)
+		{
+			$mail->SMTPAuth = 'true';
+			$mail->Username = $SMTPUsername;
+			$mail->Password = $SMTPPassword;
+			echo 'auth';
+			echo $SMTPUsername . " - " . $SMTPPassword;exit();
+			
+		}
+		if($use_auth)
+		{
+			$mail->SMTPAuth = 'true';
+			$mail->Username = $SMTPUsername;
+			$mail->Password = $SMTPGridPassword;
+		}
+		
+		// Add the from to and subject
+		$mail->From = $adminMail;
+		$mail->FromName = $adminName;
+		$mail->AddAddress($adminMail);
+		$mail->Subject = $title;
+		
+		// Set the content
+		$mail->AltBody = $content["textMail"];
+		$mail->MsgHTML($content["htmlMail"]);
+		
 		
 		// Send the mail
 		if(!$mail->Send()) {
