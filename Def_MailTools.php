@@ -91,63 +91,15 @@ class Def_MailTools extends ContentController
 	}
 	
 	/**
-	  * Get the SendGrid username
-	  *
-	  * @return string
-	  */
-
-	public static function get_sendgrid_username()
-	{
-		return self::$sendgrid_username;
-	}
-	
-	
-	/**
-	  * Get the SendGrid password
-	  *
-	  * @return string
-	  */
-	
-	public static function get_sendgrid_password()
-	{
-		return self::$sendgrid_password;
-	}
-	
-	/**
-	  * Get the SendGrid username
-	  *
-	  * @return string
-	  */
-
-	public static function get_smtp_username()
-	{	
-		return self::$smtp_username;
-	}
-	
-	
-	/**
-	  * Get the SendGrid password
-	  *
-	  * @return string
-	  */
-	
-	public static function get_smtp_password()
-	{
-		return self::$smtp_password;
-	}
-	
-	/**
-	  * Build the different (HTMl + PlainText) parts of the email
+	  * Build the different (HTML + PlainText) parts of the email
       * Also allows to select header and footer template.
       *
-	  * @param string $content
-	  * @param string $title
-	  * @param array $to
-	  * @param string $category
-	  * @param boolean $for_admin_only
-	  * @param boolean $for_recipient_only
+	  * @param array $content
+	  * @param string $plainText
+	  * @param string $mailHeader
+	  * @param string $mailFooter
 	  * 
-	  * @return boolean
+	  * @return array
 	  */
 	
 	function BuildMail($content, $plainText = '', $mailHeader = 'MailHeader',  $mailFooter = 'MailFooter')
@@ -166,47 +118,53 @@ class Def_MailTools extends ContentController
 		$convertedHTML->setUseInlineStylesBlock('true');
 		$convertedHTML =  $convertedHTML->convert();
 		
-		if($plainText == '')
-		{
-			// Create a plain text version if one wasn't specified
-			$plainText =  GetPlainTextMail::getPlainText($convertedHTML, true, true);
-		}
+		// Create a plain text version if one wasn't specified
+		if($plainText == '') { $plainText =  GetPlainTextMail::getPlainText($convertedHTML, true, true); }
 		
 		// Save both versions in an array and return it
 		$myMail = array("htmlMail" => $convertedHTML, "textMail" => $plainText);
 		return $myMail;
 	}
 	
+	/**
+	  * Check if the Admin also needs to be mailed. And filter out duplicate mail addresses.
+      *
+	  * @param array $recipients
+	  * @param boolean $also_send_to_admin
+	  * @param string $admin_mail
+	  * 
+	  * @return array
+	  */
+	
+	private static function filter_recipients($recipients, $also_send_to_admin, $admin_mail)
+	{
+		// Check if there also needs to go a mail to the admin
+		if($also_send_to_admin) { array_push($recipients, $admin_mail); }
+		
+		// Filter out duplicate recipients
+		$recipients = array_unique($recipients);
+		
+		return $recipients;
+	}
 	
 	/**
-	  * Send emails through Sendgrid
-	  *
+	  * A basic function for that sets up the SMTP Mail
+      *
 	  * @param array $recipients
 	  * @param string $title
 	  * @param array $content
-	  * @param string $category
-	  * @param boolean $also_send_to_admin
+	  * @param string $server
+	  * @param integer $port
 	  * 
-	  * @return boolean
+	  * @return PHPMailer Object
 	  */
 	
-	public static function send_mail_sendgrid($recipients, $title, $content, $category = "Uncategorized", $also_send_to_admin = false)
+	public static function setup_basic_smtp_mail($recipients, $title, $content, $server, $port)
 	{
-		// Get the SendGrid username
-		if (self::get_sendgrid_username() == '')
-		{
-			return false;
-		} else {
-			$sendGridUsername = self::get_sendgrid_username();
-		}
-		
-		// Get the SendGrid password
-		if (self::get_sendgrid_password() == '')
-		{
-			return false;
-		} else {
-			$sendGridPassword = self::get_sendgrid_password();
-		}
+		$mail = new PHPMailer();
+		$mail->IsSMTP();
+		$mail->Host = $server . ";" . $port;
+		$mail->Port = $port;
 		
 		// Get the admin mail
 		$adminMail = self::get_admin_mail();
@@ -214,47 +172,18 @@ class Def_MailTools extends ContentController
 		// Get the admin name
 		$adminName = self::get_admin_mail_name();
 		
-		// Check if there also needs to go a mail to the admin
-		if($also_send_to_admin)
-		{
-			array_push($recipients, $adminMail);
-		}
-		
-		// Prepare the special header for SendGrid
-		$hdr = new SmtpApiHeader();
-		if($recipients != '')
-		{
-			$hdr->addTo($recipients);
-		}
-		$hdr->setCategory($Cat);
-				
-		// Create a new phpmailer and set the correct settings
-		$mail = new PHPMailer();
-		$mail->IsSMTP();
-		$mail->Host = "smtp.sendgrid.net;465";
-		$mail->Port = 465;
-		$mail->SMTPSecure = 'ssl';
-		$mail->SMTPAuth = 'true';
-		$mail->Username = $sendGridUsername;
-		$mail->Password = $sendGridPassword;
-		
-		// Add the from to and subject
+		// Add sender details
 		$mail->From = $adminMail;
 		$mail->FromName = $adminName;
-		$mail->AddAddress($adminMail);
+		
+		// Set the title
 		$mail->Subject = $title;
-		$mail->AddCustomHeader('X-SMTPAPI:' . $hdr->asJSON());
 		
 		// Set the content
 		$mail->AltBody = $content["textMail"];
 		$mail->MsgHTML($content["htmlMail"]);
 		
-		// Send the mail
-		if(!$mail->Send()) {
-			return false;
-		} else {
-			return true;
-		}
+		return $mail;
 	}
 	
 	/**
@@ -264,86 +193,87 @@ class Def_MailTools extends ContentController
 	  * @param string $title
 	  * @param array $content
 	  * @param boolean $also_send_to_admin
+	  * @param string $server
+	  * @param integer $port
+	  * @param boolean $use_ssl
+	  * @param boolean $use_auth
 	  * 
 	  * @return boolean
 	  */
 	public static function send_mail_SMTP($recipients, $title, $content, $also_send_to_admin = false, $server, $port = "25", $use_ssl = false, $use_auth = false)
 	{
+		$mail = self::setup_basic_smtp_mail($recipients, $title, $content, $server, $port);
 		
-		if($use_auth)
-		{
-			// Get the SMTP username
-			if (self::get_smtp_username() == '')
-			{
-				return false;
-			} else {
-				$SMTPUsername = self::get_smtp_username();
-			}
-			
-			// Get the SMTP password
-			if (self::get_smtp_password() == '')
-			{
-				return false;
-			} else {
-				$SMTPPassword = self::get_smtp_password();
-			}
-		}
-		
-		// Get the admin mail
-		$adminMail = self::get_admin_mail();
-		
-		// Get the admin name
-		$adminName = self::get_admin_mail_name();
-		
-		// Check if there also needs to go a mail to the admin
-		if($also_send_to_admin)
-		{
-			array_push($recipients, $adminMail);
-		}
-		
-		// Filter out duplicate recipients and implode the array to a comma seperated string
-		$recipients = array_unique($recipients);
-		$recipients = implode(', ', $recipients);
-		
-		// Create a new phpmailer and set the correct settings
-		$mail = new PHPMailer();
-		$mail->IsSMTP();
-		$mail->Host = $server . ";" . $port;
-		$mail->Port = $port;
-		
-		if($use_ssl)
-		{   echo 'ssl';
-			$mail->SMTPSecure = 'ssl';
-		}
-		if($use_auth)
-		{
+		// See if authentitcation is needed
+		if($use_auth) {
+			// Return false if no username is set
+			if(self::$smtp_username == "") { return false; }
 			$mail->SMTPAuth = 'true';
-			$mail->Username = $SMTPUsername;
-			$mail->Password = $SMTPPassword;
-			echo 'auth';
-			echo $SMTPUsername . " - " . $SMTPPassword;exit();
-			
-		}
-		if($use_auth)
-		{
-			$mail->SMTPAuth = 'true';
-			$mail->Username = $SMTPUsername;
-			$mail->Password = $SMTPGridPassword;
+			$mail->Username = self::$smtp_username;
+			$mail->Password = self::$smtp_password;
 		}
 		
-		// Add the from to and subject
-		$mail->From = $adminMail;
-		$mail->FromName = $adminName;
-		$mail->AddAddress($adminMail);
-		$mail->Subject = $title;
+		// Set SSL if needed
+		if($use_ssl) { $mail->SMTPSecure = 'ssl'; }
 		
-		// Set the content
-		$mail->AltBody = $content["textMail"];
-		$mail->MsgHTML($content["htmlMail"]);
+		$recipients = self::filter_recipients($recipients, $also_send_to_admin, $mail->From);
 		
+		// Add recipients
+		foreach($recipients as $recipient) { $mail->AddAddress($recipient); }
 		
 		// Send the mail
-		if(!$mail->Send()) {
+		if(!$mail->Send())
+		{
+			return false;
+		} else {
+			return true;
+		}
+	}
+	
+	/**
+	  * Send emails through Sendgrid
+	  *
+	  * @param array $recipients
+	  * @param string $title
+	  * @param array $content
+	  * @param string $category
+	  * @param boolean $also_send_to_admin
+	  * @param string $server
+	  * @param integer $port
+	  * 
+	  * @return boolean
+	  */
+	
+	public static function send_mail_sendgrid($recipients, $title, $content, $category = "Uncategorized", $also_send_to_admin = false, $server ="smtp.sendgrid.com", $port = "465")
+	{
+		$mail = self::setup_basic_smtp_mail($recipients, $title, $content, $server, $port);
+		
+		// Fill in SendGrid credentials
+		if(self::$sendgrid_username == "" || self::$sendgrid_password == "") { return false; }
+		$mail->SMTPAuth = 'true';
+		$mail->Username = self::$sendgrid_username;
+		$mail->Password = self::$sendgrid_password;
+		$mail->SMTPSecure = 'ssl';
+
+		// Prepare the special header for SendGrid
+		$hdr = new SmtpApiHeader();
+
+		// Get recipients and add them to the header
+		$recipients = self::filter_recipients($recipients, $also_send_to_admin, $mail->From);
+		if($recipients != '') { $hdr->addTo($recipients); }
+		
+		// Add a SendGrid category
+		$hdr->setCategory($category);
+		
+		// Add the special header to the mail
+		$mail->AddCustomHeader('X-SMTPAPI:' . $hdr->asJSON());
+		
+		// Add a To address - PHPMailer needs this, but SendGrid won't use it
+		$mail->AddAddress($mail->From);
+		
+		// Send the mail
+		if(!$mail->Send()) 
+		{
 			return false;
 		} else {
 			return true;
