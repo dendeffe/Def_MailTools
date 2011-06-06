@@ -240,11 +240,12 @@ class Def_MailTools extends ContentController
 	  * @param boolean $also_send_to_admin
 	  * @param string $server
 	  * @param integer $port
+	  * @param array $extraValues
 	  * 
 	  * @return boolean
 	  */
 	
-	public static function send_mail_sendgrid($recipients, $title, $content, $category = "Uncategorized", $also_send_to_admin = false, $server ="smtp.sendgrid.com", $port = "465")
+	public static function send_mail_sendgrid($recipients, $title, $content, $category = "Uncategorized", $also_send_to_admin = false, $server ="smtp.sendgrid.com", $port = "465", $extraValues = "")
 	{
 		$mail = self::setup_basic_smtp_mail($recipients, $title, $content, $server, $port);
 		
@@ -258,6 +259,8 @@ class Def_MailTools extends ContentController
 		// Prepare the special header for SendGrid
 		$hdr = new SmtpApiHeader();
 
+
+
 		// Get recipients and add them to the header
 		$recipients = self::filter_recipients($recipients, $also_send_to_admin, $mail->From);
 		if($recipients != '') { $hdr->addTo($recipients); }
@@ -265,7 +268,16 @@ class Def_MailTools extends ContentController
 		// Add a SendGrid category
 		$hdr->setCategory($category);
 		
-		// Add the special header to the mail
+		/* add ExtraValues to be parsed by SendGrid if needed */
+		if($extraValues)
+		{
+			foreach($extraValues as $key=>$value)
+			{
+				$hdr->addSubVal($key, $value);
+			}
+		}
+		
+		// Add the special API- header to the mail
 		$mail->AddCustomHeader('X-SMTPAPI:' . $hdr->asJSON());
 		
 		// Add a To address - PHPMailer needs this, but SendGrid won't use it
