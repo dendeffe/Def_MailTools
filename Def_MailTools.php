@@ -91,6 +91,30 @@ class Def_MailTools extends ContentController
 	}
 	
 	/**
+	 * Replace a "[sitetree_link id=n]" shortcode with a link to the page with the corresponding ID.
+	 *
+	 * @return string
+	 */
+	public static function absolute_link_shortcode_handler($arguments, $content = null, $parser = null) {
+		if(!isset($arguments['id']) || !is_numeric($arguments['id'])) return;
+		
+		if (
+			   !($page = DataObject::get_by_id('SiteTree', $arguments['id']))         // Get the current page by ID.
+			&& !($page = Versioned::get_latest_version('SiteTree', $arguments['id'])) // Attempt link to old version.
+			&& !($page = DataObject::get_one('ErrorPage', '"ErrorCode" = \'404\''))   // Link to 404 page directly.
+		) {
+			 return; // There were no suitable matches at all.
+		}
+		
+		if($content) {
+			return sprintf('<a href="%s">%s</a>', $page->AbsoluteLink(), $parser->parse($content));
+		} else {
+			return $page->AbsoluteLink();
+		}
+	}
+	
+	
+	/**
 	  * Build the different (HTML + PlainText) parts of the email
       * Also allows to select header and footer template.
       *
@@ -107,6 +131,11 @@ class Def_MailTools extends ContentController
 		// Change relative links to assets to absolute
 		$content = str_replace('src="assets', 'src="' . Director::absoluteBaseURL() . 'assets', $content);
 		$content = str_replace('href="assets', 'href="' . Director::absoluteBaseURL() . 'assets', $content);
+		
+		// Change internal links ([sitetree_link id=n]) to proper absolute links
+		$parser = new ShortcodeParser();
+		$parser->register('sitetree_link', array('Def_MailTools', 'absolute_link_shortcode_handler'));
+		$content = $parser->parse($content);
 		
 		// construct the HTML mail
 		$html = $this->renderWith($mailHeader);
